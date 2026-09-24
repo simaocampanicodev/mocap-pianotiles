@@ -105,7 +105,7 @@ public static class PianoSetup
         {
             txt.AppendLine($"    character: {(game.player != null ? game.player.name : "NO")}");
             txt.AppendLine($"    tile models: {game.tileModels.Count(m => m != null)}/3   pressed: {game.pressedTileModels.Count(m => m != null)}/3");
-            txt.AppendLine($"    slides: {(game.slideChance > 0f ? $"on ({game.slideChance:P0} of tiles, {game.slideMinDuration:0.0}-{game.slideMaxDuration:0.0}s)" : "off")}");
+            txt.AppendLine($"    slides: {(game.slides ? $"on (notes of {game.slideMinDuration:0.0}s or more, up to {game.slideMaxDuration:0.0}s)" : "off")}");
             txt.AppendLine($"    floor key colliders: {game.GetComponentsInChildren<FloorKey>(true).Length}/3");
         }
         if (player == null) txt.AppendLine("  PlayerController in scene: NO - run step 2");
@@ -501,7 +501,10 @@ public static class PianoSetup
         if (!string.IsNullOrEmpty(scene.path)) EditorSceneManager.SaveScene(scene);
         Selection.activeGameObject = game.gameObject;
         Debug.Log($"[Piano] game built with '{character.name}'. Press Play.\n" +
-                  "A / S / D = left / middle / right key, Q / E = stretch leg, W = jump, N = next song, R = restart.", game);
+                  "A S D F G = lanes, Q / E = stretch leg, W = jump, R = restart, M = menu.", game);
+
+        // menu inicial e HUD (imagens em Assets/Art/UI)
+        PianoUISetup.Build(game);
     }
 
     // roda o boneco para ficar de frente para os tiles (a esquerda dele = lane da esquerda)

@@ -105,6 +105,7 @@ public static class PianoSetup
         {
             txt.AppendLine($"    character: {(game.player != null ? game.player.name : "NO")}");
             txt.AppendLine($"    tile models: {game.tileModels.Count(m => m != null)}/3   pressed: {game.pressedTileModels.Count(m => m != null)}/3");
+            txt.AppendLine($"    slides: {(game.slideChance > 0f ? $"on ({game.slideChance:P0} of tiles, {game.slideMinDuration:0.0}-{game.slideMaxDuration:0.0}s)" : "off")}");
             txt.AppendLine($"    floor key colliders: {game.GetComponentsInChildren<FloorKey>(true).Length}/3");
         }
         if (player == null) txt.AppendLine("  PlayerController in scene: NO - run step 2");
@@ -209,7 +210,14 @@ public static class PianoSetup
             .FirstOrDefault(c => !c.name.StartsWith("__preview__"));
         if (model == null || original == null)
         {
-            Debug.LogError($"[Piano] no animation found in {info.fbx}");
+            // sem a gravação: usa a animação que já foi convertida antes (se existir)
+            var ready = AssetDatabase.LoadAssetAtPath<AnimationClip>($"{ClipsFolder}/{info.state}.anim");
+            if (ready != null)
+            {
+                Debug.Log($"[Piano] {info.state}: recording {info.fbx} not in the project, using the clip already made.");
+                return ready;
+            }
+            Debug.LogError($"[Piano] no animation found in {info.fbx} and no {ClipsFolder}/{info.state}.anim");
             return null;
         }
 
@@ -468,6 +476,7 @@ public static class PianoSetup
 
         CreateFolder(MaterialsFolder);
         game.tileMaterial = GetMaterial("Tile", new Color(0.05f, 0.05f, 0.07f), Color.black, 0.75f);
+        game.effectMaterial = GetEffectMaterial();
         game.hitMaterial = GetMaterial("Tile Hit", new Color(0.35f, 0.8f, 1f), new Color(0.15f, 0.45f, 0.8f), 0.6f);
         game.missMaterial = GetMaterial("Tile Miss", new Color(0.9f, 0.15f, 0.15f), new Color(0.5f, 0.02f, 0.02f), 0.4f);
 
@@ -597,6 +606,22 @@ public static class PianoSetup
             m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
         }
         AssetDatabase.CreateAsset(m, path);
+        return m;
+    }
+
+    // material das faíscas de acerto (partículas do URP com uma bolinha suave como textura)
+    static Material GetEffectMaterial()
+    {
+        string path = $"{MaterialsFolder}/Hit Effect.mat";
+        var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+        if (m != null) return m;
+
+        Texture2D tex = HitEffects.CreateTexture();
+        m = HitEffects.CreateMaterial(tex);
+        if (m == null) return null;
+        AssetDatabase.CreateAsset(m, path);
+        AssetDatabase.AddObjectToAsset(tex, m);
+        AssetDatabase.SaveAssets();
         return m;
     }
 

@@ -4,5 +4,5 @@ using UnityEngine;
 [RequireComponent(typeof(BoxCollider))]
 public class FloorKey : MonoBehaviour
 {
-    [HideInInspector] public int lane;   // 0 = esquerda, 1 = meio, 2 = direita
+    public int lane;   // 0 = esquerda, 1 = meio, 2 = direita
 }

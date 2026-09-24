@@ -14,7 +14,7 @@ public class PianoGame : MonoBehaviour
     public const float KeyWidthFactor = 0.7f;   // largura da tecla que se vê (o collider apanha a lane toda)
     public const float LeadTime = 3f;           // segundos que o tile é visível antes de chegar
     public const float EndZ = -4f;
-    public const float TileHeight = 0.12f;
+    public const float TileHeight = 0.2f;       // mais alto para se ver a tecla a afundar
     public const float TileWidthFactor = 0.92f;
     public const float TileLength = 1.2f;
     public const float StartDelay = 3f;
@@ -26,6 +26,10 @@ public class PianoGame : MonoBehaviour
     static readonly Color KeySteppedColor = new Color(1f, 0.82f, 0.3f);
     static readonly Color KeyHitColor = new Color(0.35f, 0.8f, 1f);
 
+    public const float HoldGrace = 0.3f;        // segundos que o pé pode sair do slide sem o perder
+    public const float HoldFinishWindow = 0.15f; // largar mesmo no fim do slide ainda conta
+
+    [Header("Game")]
     [Tooltip("tile speed in meters per second")]
     public float speed = 5f;
     [Tooltip("seconds between tiles")]
@@ -35,24 +39,47 @@ public class PianoGame : MonoBehaviour
     [Tooltip("tiles to hit to win (0 = never ends)")]
     public int tilesToWin = 20;
 
-    // tudo isto é ligado pelo menu Piano
-    [HideInInspector] public Transform player;
-    [HideInInspector] public PlayerController controller;
-    [HideInInspector] public PlayerFeet playerFeet;
-    [HideInInspector] public GameObject[] tileModels = new GameObject[3];
-    [HideInInspector] public GameObject[] pressedTileModels = new GameObject[3];
-    [HideInInspector] public Material tileMaterial;
-    [HideInInspector] public Material hitMaterial;
-    [HideInInspector] public Material missMaterial;
-    [HideInInspector] public Renderer[] keys = new Renderer[3];
-    [HideInInspector] public TMP_Text scoreText;
-    [HideInInspector] public TMP_Text messageText;
-    [HideInInspector] public TMP_Text centerText;
+    [Header("Slides (hold tiles)")]
+    [Tooltip("chance of a tile being a slide (0 = never, 1 = always)")]
+    [Range(0f, 1f)] public float slideChance = 0.3f;
+    [Tooltip("shortest time the player has to stay on a slide (seconds)")]
+    public float slideMinDuration = 1f;
+    [Tooltip("longest time the player has to stay on a slide (seconds)")]
+    public float slideMaxDuration = 2.5f;
+
+    // tudo isto é ligado pelo menu Piano, mas dá para arrastar à mão
+    [Header("Player")]
+    public Transform player;
+    public PlayerController controller;
+    public PlayerFeet playerFeet;
+
+    [Header("Tiles")]
+    public GameObject[] tileModels = new GameObject[3];
+    public GameObject[] pressedTileModels = new GameObject[3];
+    [Tooltip("turn the tile models upside down (use if they show the wrong side up)")]
+    public bool flipTileModels = false;
+    public Material tileMaterial;
+    public Material hitMaterial;
+    public Material missMaterial;
+
+    [Header("Effects")]
+    [Tooltip("sparks and glow when a tile is hit or a slide is completed")]
+    public bool hitEffects = true;
+    [Tooltip("particle material (empty = one is made when the game starts)")]
+    public Material effectMaterial;
+
+    [Header("Floor keys")]
+    public Renderer[] keys = new Renderer[3];
+
+    [Header("UI")]
+    public TMP_Text scoreText;
+    public TMP_Text messageText;
+    public TMP_Text centerText;
 
     public bool GameOver { get; private set; }
     public bool Won { get; private set; }
 
-    const string Controls = "A / S / D = left / middle / right key     Q / E = stretch leg     W = jump     R = restart";
+    const string Controls = "A / S / D = left / middle / right key     Q / E = stretch leg     W = jump     R = restart     long tiles: stay on them";
 
     readonly List<PianoTile> activeTiles = new List<PianoTile>();
     readonly float[] keyFlash = new float[3];
@@ -97,8 +124,10 @@ public class PianoGame : MonoBehaviour
             clock += Time.deltaTime;
             while (nextArrival - clock <= LeadTime)
             {
-                SpawnTile(PickLane(), nextArrival);
-                nextArrival += Mathf.Max(0.3f, spawnInterval);
+                float hold = PickHoldDuration();
+                SpawnTile(PickLane(), nextArrival, hold);
+                // o próximo tile só chega depois do slide acabar
+                nextArrival += hold + Mathf.Max(0.3f, spawnInterval);
             }
         }
 
@@ -140,18 +169,37 @@ public class PianoGame : MonoBehaviour
         return lane;
     }
 
-    void SpawnTile(int lane, float arrivalTime)
+    // 0 = tile normal, senão quantos segundos é preciso ficar em cima
+    float PickHoldDuration()
+    {
+        if (slideChance <= 0f || Random.value >= slideChance) return 0f;
+        float min = Mathf.Max(0.5f, slideMinDuration);
+        float max = Mathf.Max(min, slideMaxDuration);
+        return Random.Range(min, max);
+    }
+
+    void SpawnTile(int lane, float arrivalTime, float holdDuration)
     {
         GameObject go = Instantiate(templates[lane], transform);
-        go.name = $"Tile {lane + 1}";
         go.SetActive(true);
-        go.transform.localRotation = Quaternion.identity;
-        go.transform.localScale = new Vector3(LaneWidth * TileWidthFactor, TileHeight, TileLength);
 
         PianoTile tile = go.GetComponent<PianoTile>();
         tile.lane = lane;
         tile.arrivalTime = arrivalTime;
+        tile.holdDuration = holdDuration;
+        // o slide acaba quando a parte de trás chega ao jogador
+        tile.length = tile.IsSlide ? Mathf.Max(TileLength, holdDuration * speed) : TileLength;
         tile.state = PianoTile.State.Incoming;
+
+        go.name = tile.IsSlide ? $"Slide {lane + 1}" : $"Tile {lane + 1}";
+        go.transform.localRotation = Quaternion.identity;
+        go.transform.localScale = new Vector3(LaneWidth * TileWidthFactor, TileHeight, tile.length);
+        if (tile.IsSlide)
+        {
+            tile.PaintProgress(hitMaterial);
+            tile.SetProgress(0f);
+        }
+
         PlaceTile(tile);
         activeTiles.Add(tile);
     }
@@ -169,13 +217,22 @@ public class PianoGame : MonoBehaviour
 
             PlaceTile(t);
 
-            if (!GameOver && !Won && t.state == PianoTile.State.Incoming)
+            if (!GameOver && !Won)
             {
-                if (clock >= t.arrivalTime - EarlyWindow && playerFeet != null && playerFeet.IsOnLane(t.lane)) Hit(t);
-                else if (clock > t.arrivalTime + LateWindow) Miss(t);
+                bool onLane = playerFeet != null && playerFeet.IsOnLane(t.lane);
+                if (t.state == PianoTile.State.Incoming)
+                {
+                    if (clock >= t.arrivalTime - EarlyWindow && onLane)
+                    {
+                        if (t.IsSlide) StartHold(t);
+                        else Hit(t);
+                    }
+                    else if (clock > t.arrivalTime + LateWindow) Miss(t);
+                }
+                else if (t.state == PianoTile.State.Holding) UpdateHold(t, onLane);
             }
 
-            if (t.transform.localPosition.z + TileLength < EndZ)
+            if (t.transform.localPosition.z + t.length < EndZ)
             {
                 activeTiles.RemoveAt(i);
                 Destroy(t.gameObject);
@@ -190,17 +247,60 @@ public class PianoGame : MonoBehaviour
         keyFlash[t.lane] = 1f;
 
         score++;
-        ShowFeedback("HIT", new Color(0.4f, 0.9f, 1f));
+        ShowFeedback(t.IsSlide ? "SLIDE!" : "HIT", new Color(0.4f, 0.9f, 1f));
+        PlayHitEffect(t);
         if (tilesToWin > 0 && score >= tilesToWin) Won = true;
+    }
+
+    // ------------------------------------------------------------- slides
+
+    void StartHold(PianoTile t)
+    {
+        t.state = PianoTile.State.Holding;
+        t.lastOnLaneTime = clock;
+        ShowFeedback("HOLD", new Color(0.4f, 0.9f, 1f));
+    }
+
+    // fica em cima: a barra enche; sai durante mais de HoldGrace: perde o slide
+    void UpdateHold(PianoTile t, bool onLane)
+    {
+        float end = t.arrivalTime + t.holdDuration;
+        float progress = (clock - t.arrivalTime) / t.holdDuration;
+        t.SetProgress(progress);
+        keyFlash[t.lane] = Mathf.Max(keyFlash[t.lane], 0.6f);
+
+        if (onLane) t.lastOnLaneTime = clock;
+
+        if (clock >= end)
+        {
+            Hit(t);
+            return;
+        }
+        if (clock - t.lastOnLaneTime > HoldGrace)
+        {
+            // largou mesmo no fim: ainda conta
+            if (t.lastOnLaneTime >= end - HoldFinishWindow) Hit(t);
+            else Miss(t);
+        }
     }
 
     void Miss(PianoTile t)
     {
         t.state = PianoTile.State.Missed;
         t.Paint(missMaterial);
+        t.PaintProgress(missMaterial);
         misses++;
         ShowFeedback("MISS", new Color(1f, 0.3f, 0.3f));
         if (misses >= lives) GameOver = true;
+    }
+
+    // faíscas na tecla, junto ao jogador; o slide completo dá um efeito maior
+    void PlayHitEffect(PianoTile t)
+    {
+        if (!hitEffects) return;
+        Vector3 position = transform.TransformPoint(new Vector3((t.lane - 1) * LaneWidth, TileHeight, 0.3f));
+        Color color = hitMaterial != null && hitMaterial.HasProperty(BaseColorId) ? hitMaterial.GetColor(BaseColorId) : KeyHitColor;
+        HitEffects.Play(position, color, t.IsSlide ? 1.8f : 1f, effectMaterial);
     }
 
     void ShowFeedback(string text, Color color)
@@ -257,23 +357,54 @@ public class PianoGame : MonoBehaviour
 
             // o lado comprido do modelo fica ao longo da pista
             Bounds b = LocalBounds(root.transform, normal);
-            if (b.size.x > b.size.z * 1.05f)
-            {
-                turn.localRotation = Quaternion.Euler(0f, 90f, 0f);
-                b = LocalBounds(root.transform, normal);
-            }
+            Quaternion yaw = b.size.x > b.size.z * 1.05f ? Quaternion.Euler(0f, 90f, 0f) : Quaternion.identity;
+            // virar ao contrário (de cima para baixo) sem trocar esquerda e direita
+            Quaternion flip = flipTileModels ? Quaternion.Euler(180f, 0f, 0f) : Quaternion.identity;
+            turn.localRotation = flip * yaw;
+            b = LocalBounds(root.transform, normal);
             var scale = new Vector3(1f / Mathf.Max(b.size.x, 1e-4f), 1f / Mathf.Max(b.size.y, 1e-4f), 1f / Mathf.Max(b.size.z, 1e-4f));
             fit.localScale = scale;
             fit.localPosition = new Vector3(-b.center.x * scale.x, -b.min.y * scale.y, -b.min.z * scale.z);
 
-            if (pressed != null) pressed.SetActive(false);
+            // a tecla afundada é mais baixa: assenta-a no chão (senão fica a flutuar)
+            float pressedHeight = 0.6f;
+            if (pressed != null)
+            {
+                Bounds pb = LocalBounds(root.transform, pressed);
+                pressed.transform.position += root.transform.TransformVector(new Vector3(0f, -pb.min.y, 0f));
+                pressedHeight = Mathf.Clamp(pb.size.y, 0.1f, 1f);   // a tecla normal tem altura 1
+                pressed.SetActive(false);
+            }
 
             PianoTile tile = root.AddComponent<PianoTile>();
+            tile.pressedHeight = pressedHeight;
             tile.normal = normal;
             tile.pressed = pressed;
+            tile.fill = CreateFill(root.transform, fit);
             tile.Paint(tileMaterial);
             templates[lane] = root;
         }
+    }
+
+    // cópia da tecla por cima da original que vai crescendo com a cor de acerto (só nos slides)
+    static Transform CreateFill(Transform root, Transform fit)
+    {
+        var fill = new GameObject("fill").transform;
+        fill.SetParent(root, false);
+        // um pouco maior que a tecla preta para a tapar sem piscar
+        fill.localPosition = new Vector3(0f, 0f, -0.002f);
+        fill.localScale = new Vector3(1.03f, 1.04f, 1f);   // o comprimento (Z) muda com o progresso
+
+        GameObject copy = Instantiate(fit.gameObject, fill, false);
+        copy.name = "fit";
+        foreach (Transform t in copy.GetComponentsInChildren<Transform>(true))
+            if (t.name == "pressed") Destroy(t.gameObject);
+        foreach (Collider c in copy.GetComponentsInChildren<Collider>(true)) Destroy(c);
+        foreach (Renderer r in copy.GetComponentsInChildren<Renderer>(true))
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+
+        fill.gameObject.SetActive(false);
+        return fill;
     }
 
     static GameObject Model(GameObject prefab, Transform parent, string name)

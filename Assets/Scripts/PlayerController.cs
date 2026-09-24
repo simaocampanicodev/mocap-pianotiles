@@ -31,10 +31,12 @@ public class PlayerController : MonoBehaviour
     [Tooltip("turn on when the character is driven by live motion capture (Vicon)")]
     public bool liveMocap = false;
 
-    [HideInInspector] public PianoGame game;
-    [HideInInspector] public Transform track;
-    [HideInInspector] public Animator animator;
-    [HideInInspector] public PlayerFeet feet;
+    // ligado pelo menu Piano, mas dá para arrastar à mão
+    [Header("References")]
+    public PianoGame game;
+    public Transform track;
+    public Animator animator;
+    public PlayerFeet feet;
 
     int lane = 1;
     float x, xStart, xTarget;

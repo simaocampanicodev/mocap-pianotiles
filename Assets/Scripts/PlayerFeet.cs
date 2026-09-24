@@ -15,7 +15,8 @@ public class PlayerFeet : MonoBehaviour
         ("RightFoot", "RightToeBaseEnd", "Right"),
     };
 
-    [HideInInspector] public List<FootCollider> colliders = new List<FootCollider>();
+    [Tooltip("foot colliders (created by Tools > Piano)")]
+    public List<FootCollider> colliders = new List<FootCollider>();
 
     // pés a tocar numa tecla (0, 1 ou 2)
     public int GroundedCount

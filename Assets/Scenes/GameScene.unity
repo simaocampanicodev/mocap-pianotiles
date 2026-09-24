@@ -3163,16 +3163,18 @@ MonoBehaviour:
   controller: {fileID: 1832873954}
   playerFeet: {fileID: 1832873951}
   tileModels:
-  - {fileID: 919132149155446097, guid: 12c927aebec240e4fa27d5baf88f33bc, type: 3}
-  - {fileID: 919132149155446097, guid: 3bf3e4ba0da48ca468ba46a51ea9c06e, type: 3}
-  - {fileID: 919132149155446097, guid: d132bca56b244ca4c9e4b3f7abf88229, type: 3}
+  - {fileID: 919132149155446097, guid: 404cfd9b70df6e9448f16553acc09f2b, type: 3}
+  - {fileID: 919132149155446097, guid: e45084977d6744c46a95e3d33fb66564, type: 3}
+  - {fileID: 919132149155446097, guid: f50c5a56a3f6a2046af5ed696666c87a, type: 3}
   pressedTileModels:
-  - {fileID: 919132149155446097, guid: bf4ae36c38095c141ac5d42af148239a, type: 3}
-  - {fileID: 919132149155446097, guid: f9d6624c4dde4da45ae36af414f40b10, type: 3}
-  - {fileID: 919132149155446097, guid: b7d1205a59fd5f241bb4fa573f508527, type: 3}
+  - {fileID: 919132149155446097, guid: c6518ea32268c3a46969a8b212979cc3, type: 3}
+  - {fileID: 919132149155446097, guid: 63affeec49b7f52439436ad15620fde2, type: 3}
+  - {fileID: 919132149155446097, guid: 34aa165fec16a0046a15af84347e4439, type: 3}
   tileMaterial: {fileID: 2100000, guid: 649ab621582b9d04ba2b4c3cd6831dc5, type: 2}
   hitMaterial: {fileID: 2100000, guid: faca8e4472e8c704f8cb05dbc9ef120c, type: 2}
   missMaterial: {fileID: 2100000, guid: 624b53f104c96994e82457c43a12b195, type: 2}
+  hitEffects: 1
+  effectMaterial: {fileID: 2100000, guid: 3cb01b88a9f395f4db71d2b94a451ba3, type: 2}
   keys:
   - {fileID: 791332994}
   - {fileID: 1646028921}

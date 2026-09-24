@@ -105,7 +105,7 @@ public static class PianoSetup
         {
             txt.AppendLine($"    character: {(game.player != null ? game.player.name : "NO")}");
             txt.AppendLine($"    tile models: {game.tileModels.Count(m => m != null)}/3   pressed: {game.pressedTileModels.Count(m => m != null)}/3");
-            txt.AppendLine($"    slides: {(game.slideChance > 0f ? $"on ({game.slideChance:P0} of tiles, {game.slideMinDuration:0.0}-{game.slideMaxDuration:0.0}s)" : "off")}");
+            txt.AppendLine($"    slides: {(game.slides ? $"on (notes of {game.slideMinDuration:0.0}s or more, up to {game.slideMaxDuration:0.0}s)" : "off")}");
             txt.AppendLine($"    floor key colliders: {game.GetComponentsInChildren<FloorKey>(true).Length}/3");
         }
         if (player == null) txt.AppendLine("  PlayerController in scene: NO - run step 2");

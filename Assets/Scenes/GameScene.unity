@@ -6171,7 +6171,7 @@ MonoBehaviour:
   gameMenu: {fileID: 661244295}
   hud: {fileID: 1139100655}
   missSound: {fileID: 8300000, guid: 48ac16e7fa2dffb4bb5a154aba1774cf, type: 3}
-  missVolume: 0.8
+  missVolume: 0.5
 --- !u!4 &1327215699
 Transform:
   m_ObjectHideFlags: 0

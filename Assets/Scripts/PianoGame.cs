@@ -3,6 +3,10 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
+using System.IO;
+using System.Linq;
+using Melanchall.DryWetMidi.Core;
+using Melanchall.DryWetMidi.Interaction;
 
 // piano tiles no chão: os tiles vêm ter com o jogador e ele tem de estar na tecla certa
 // os pés são detetados pelos colliders dos pés (PlayerFeet) nas teclas do chão (FloorKey)
@@ -49,6 +53,13 @@ public class PianoGame : MonoBehaviour
     [HideInInspector] public TMP_Text messageText;
     [HideInInspector] public TMP_Text centerText;
 
+     private string midiFile;
+    [SerializeField] private AudioSource audioSource;
+
+    public float audioOffset = 0.25f;
+
+    public float minNoteInterval = 0.4f;
+
     public bool GameOver { get; private set; }
     public bool Won { get; private set; }
 
@@ -58,16 +69,37 @@ public class PianoGame : MonoBehaviour
     readonly float[] keyFlash = new float[3];
     GameObject[] templates;
     int score, misses;
-    float clock, nextArrival;
+    float clock;
     int lastLane = 1, sameLaneCount;
     MaterialPropertyBlock block;
     string feedback;
     Color feedbackColor;
     float feedbackUntil;
 
+    private List<float> noteTimes = new List<float>();
+    private List<int> noteLanes = new List<int>();
+    private int currentNoteIndex = 0;
+    private bool musicStarted = false;
+
     static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     static readonly int ColorId = Shader.PropertyToID("_Color");
     static readonly int EmissionId = Shader.PropertyToID("_EmissionColor");
+
+    [System.Serializable]
+    public struct SongData
+    {
+        public string songName;
+        public string midiFileName;
+        public AudioClip audioClip;
+        public float audioOffset;
+    }
+
+    public GameObject menuPanel;
+    public TMP_Text menuSelectionText;
+    public List<SongData> songs = new List<SongData>();
+    private int selectedSongIndex = 0;
+    private int difficulty = 1;
+    private bool inMenu = true;
 
     void Start()
     {
@@ -84,27 +116,105 @@ public class PianoGame : MonoBehaviour
 
         CreateTemplates();
         if (scoreText == null || messageText == null || centerText == null) CreateUI();
+        inMenu = true;
         Restart();
+        OpenMenu();
+    }
+
+    void LerMidi()
+    {
+        noteTimes.Clear();
+        noteLanes.Clear();
+
+        string path = Path.Combine(Application.streamingAssetsPath, midiFile);
+
+        if (!File.Exists(path))
+        {
+            Debug.LogError($"[Piano] ERRO: Ficheiro MIDI não encontrado em: {path}. Verifica a pasta StreamingAssets e o nome do ficheiro!");
+            return;
+        }
+
+        MidiFile midi = MidiFile.Read(path);
+        TempoMap tempoMap = midi.GetTempoMap();
+
+        var notes = midi.GetNotes().OrderBy(n => n.Time);
+
+        foreach (Note note in notes)
+        {
+            float time = ((float)note.TimeAs<MetricTimeSpan>(tempoMap).TotalMicroseconds / 1000000f) + audioOffset;
+
+            if (noteTimes.Count > 0 && (time - noteTimes[noteTimes.Count - 1]) < minNoteInterval)
+                continue;
+
+            noteTimes.Add(time);
+            noteLanes.Add(note.NoteNumber % 3);
+        }
+
+        tilesToWin = noteTimes.Count;
+        Debug.Log($"[Piano] MIDI carregado com sucesso! Total de notas a cair: {noteTimes.Count}");
     }
 
     void Update()
     {
         Keyboard k = Keyboard.current;
         if (k != null && k.rKey.wasPressedThisFrame) Restart();
+        if (k != null && (k.mKey.wasPressedThisFrame || k.escapeKey.wasPressedThisFrame))
+        {
+            OpenMenu();
+        }
+
+        if (inMenu) return;
 
         if (!GameOver && !Won)
         {
-            clock += Time.deltaTime;
-            while (nextArrival - clock <= LeadTime)
+            if (clock < 0f)
             {
-                SpawnTile(PickLane(), nextArrival);
-                nextArrival += Mathf.Max(0.3f, spawnInterval);
+                clock += Time.deltaTime;
+                if (clock >= 0f && !musicStarted)
+                {
+                    musicStarted = true;
+                    if (audioSource != null) audioSource.Play();
+                }
+            }
+            else
+            {
+                if (audioSource != null && audioSource.isPlaying)
+                    clock = audioSource.time;
+                else
+                    clock += Time.deltaTime;
+            }
+
+            while (currentNoteIndex < noteTimes.Count && noteTimes[currentNoteIndex] - clock <= LeadTime)
+            {
+                SpawnTile(noteLanes[currentNoteIndex], noteTimes[currentNoteIndex]);
+                currentNoteIndex++;
             }
         }
 
         UpdateTiles();
         UpdateKeys();
         UpdateUI();
+    }
+
+    public void StartSelectedGame()
+    {
+        if (difficulty == 0) { speed = 3.0f; minNoteInterval = 0.70f; lives = 5; }
+        else if (difficulty == 1) { speed = 4.5f; minNoteInterval = 0.45f; lives = 3; }
+        else if (difficulty == 2) { speed = 6.5f; minNoteInterval = 0.25f; lives = 2; }
+
+        if (songs.Count > 0 && selectedSongIndex < songs.Count)
+        {
+            SongData s = songs[selectedSongIndex];
+            midiFile = s.midiFileName;
+            audioOffset = s.audioOffset;
+            if (audioSource != null && s.audioClip != null)
+                audioSource.clip = s.audioClip;
+        }
+
+        inMenu = false;
+        if (menuPanel != null) menuPanel.SetActive(false);
+        LerMidi();
+        Restart();
     }
 
     public void Restart()
@@ -117,7 +227,16 @@ public class PianoGame : MonoBehaviour
         GameOver = Won = false;
         feedback = null;
         clock = -StartDelay;
-        nextArrival = 0f;
+
+        currentNoteIndex = 0;
+        musicStarted = false;
+        if (audioSource != null)
+        {
+            if (audioSource == null) audioSource = GetComponent<AudioSource>();
+            if (audioSource != null) audioSource.Stop();
+        }
+
+        
         lastLane = 1;
         sameLaneCount = 0;
 
@@ -408,4 +527,45 @@ public class PianoGame : MonoBehaviour
         Gizmos.color = Color.cyan;
         Gizmos.DrawLine(new Vector3(-1.5f * LaneWidth, 0.01f, 0f), new Vector3(1.5f * LaneWidth, 0.01f, 0f));
     }
+
+    public void SelectSong(int index)
+    {
+        selectedSongIndex = index;
+        Debug.Log($"Música selecionada: {index}");
+        UpdateMenuUI();
+    }
+
+    public void SetDifficulty(int diff)
+    {
+        difficulty = diff;
+        Debug.Log($"Dificuldade selecionada: {diff}");
+        UpdateMenuUI();
+    }
+
+    public void OpenMenu()
+    {
+        inMenu = true;
+        if (audioSource != null) audioSource.Stop();
+        foreach (PianoTile t in activeTiles)
+            if (t != null) Destroy(t.gameObject);
+        activeTiles.Clear();
+        if (centerText != null) centerText.text = "";
+
+        if (menuPanel != null) menuPanel.SetActive(true);
+        UpdateMenuUI();
+    }
+
+    void UpdateMenuUI()
+    {
+        if (menuSelectionText == null) return;
+
+        string nomeMusica = (songs.Count > 0 && selectedSongIndex < songs.Count)
+            ? songs[selectedSongIndex].songName
+            : "Nenhuma música";
+
+        string nomeDificuldade = difficulty == 0 ? "Fácil" : (difficulty == 1 ? "Médio" : "Difícil");
+
+        menuSelectionText.text = $"Música: <color=#00FF88>{nomeMusica}</color>\nDificuldade: <color=#00D8FF>{nomeDificuldade}</color>";
+    }
+
 }

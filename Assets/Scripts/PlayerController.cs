@@ -39,6 +39,9 @@ public class PlayerController : MonoBehaviour
     public PlayerFeet feet;
 
     int lane = 1;
+    int LaneCount => game != null ? game.LaneCount : 3;
+    int StartLane => (LaneCount - 1) / 2;   // lane do meio (com 4 lanes fica na do meio à esquerda)
+    float LaneX(int l) => game != null ? game.LaneX(l) : (l - 1) * PianoGame.LaneWidth;
     float x, xStart, xTarget;
     float moveStart = -99f, moveDelay, moveDuration;
     float localHeight, localZ;
@@ -84,11 +87,14 @@ public class PlayerController : MonoBehaviour
         Keyboard k = Keyboard.current;
         if (k != null && (game == null || !game.GameOver))
         {
+            // A S D F G (ou 1 a 5) = lanes da esquerda para a direita
             if (k.aKey.wasPressedThisFrame || k.digit1Key.wasPressedThisFrame) GoTo(0);
             if (k.sKey.wasPressedThisFrame || k.digit2Key.wasPressedThisFrame) GoTo(1);
             if (k.dKey.wasPressedThisFrame || k.digit3Key.wasPressedThisFrame) GoTo(2);
+            if ((k.fKey.wasPressedThisFrame || k.digit4Key.wasPressedThisFrame) && LaneCount > 3) GoTo(3);
+            if ((k.gKey.wasPressedThisFrame || k.digit5Key.wasPressedThisFrame) && LaneCount > 4) GoTo(4);
             if (k.leftArrowKey.wasPressedThisFrame && lane > 0) GoTo(lane - 1);
-            if (k.rightArrowKey.wasPressedThisFrame && lane < 2) GoTo(lane + 1);
+            if (k.rightArrowKey.wasPressedThisFrame && lane < LaneCount - 1) GoTo(lane + 1);
             if (k.qKey.wasPressedThisFrame) Split(-1);
             if (k.eKey.wasPressedThisFrame) Split(1);
             if (k.wKey.wasPressedThisFrame || k.spaceKey.wasPressedThisFrame) Play(Jump);
@@ -100,10 +106,10 @@ public class PlayerController : MonoBehaviour
         transform.position = track.TransformPoint(new Vector3(x, localHeight, localZ));
     }
 
-    // 1 lane = hop, 2 lanes = salto, a mesma = hop no sítio
+    // 1 lane = hop, 2 ou mais lanes = salto, a mesma = hop no sítio
     void GoTo(int newLane)
     {
-        newLane = Mathf.Clamp(newLane, 0, 2);
+        newLane = Mathf.Clamp(newLane, 0, LaneCount - 1);
         int diff = newLane - lane;
         string state;
         if (diff == 0) state = HopMiddle;
@@ -112,7 +118,7 @@ public class PlayerController : MonoBehaviour
 
         lane = newLane;
         xStart = x;
-        xTarget = (lane - 1) * PianoGame.LaneWidth;
+        xTarget = LaneX(lane);
 
         moveDelay = 0.1f;
         moveDuration = 0.4f;
@@ -127,7 +133,7 @@ public class PlayerController : MonoBehaviour
     void Split(int side)
     {
         int other = lane + side;
-        if (other < 0 || other > 2) return;
+        if (other < 0 || other > LaneCount - 1) return;
         Play(side < 0 ? SplitLeft : SplitRight);
     }
 
@@ -156,8 +162,8 @@ public class PlayerController : MonoBehaviour
     public void ResetPlayer()
     {
         if (liveMocap) return;
-        lane = 1;
-        x = xStart = xTarget = 0f;
+        lane = StartLane;
+        x = xStart = xTarget = LaneX(lane);
         moveStart = -99f;
         moveDuration = 0f;
         if (animator == null || !animator.isActiveAndEnabled || animator.runtimeAnimatorController == null) return;

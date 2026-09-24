@@ -501,7 +501,10 @@ public static class PianoSetup
         if (!string.IsNullOrEmpty(scene.path)) EditorSceneManager.SaveScene(scene);
         Selection.activeGameObject = game.gameObject;
         Debug.Log($"[Piano] game built with '{character.name}'. Press Play.\n" +
-                  "A / S / D = left / middle / right key, Q / E = stretch leg, W = jump, N = next song, R = restart.", game);
+                  "A S D F G = lanes, Q / E = stretch leg, W = jump, R = restart, M = menu.", game);
+
+        // menu inicial e HUD (imagens em Assets/Art/UI)
+        PianoUISetup.Build(game);
     }
 
     // roda o boneco para ficar de frente para os tiles (a esquerda dele = lane da esquerda)

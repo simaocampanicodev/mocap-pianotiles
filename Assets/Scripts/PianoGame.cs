@@ -25,6 +25,8 @@ public class PianoGame : MonoBehaviour
     public const float EarlyWindow = 0.15f;     // já conta um pouco antes de chegar
     public const float LateWindow = 0.3f;       // e um pouco depois
     public const float MinJumpTime = 1.2f;      // tempo mínimo para mandar um tile 2 lanes ao lado
+    public const float MinStepTime = 0.6f;      // abaixo disto o tile seguinte só pode estar na lane do lado
+    public const int MaxLanes = 5;
 
     static readonly Color KeyColor = new Color(0.55f, 0.57f, 0.62f);
     static readonly Color KeySteppedColor = new Color(1f, 0.82f, 0.3f);
@@ -74,6 +76,14 @@ public class PianoGame : MonoBehaviour
 
     [Header("Floor keys")]
     public Renderer[] keys = new Renderer[3];
+    [Tooltip("number of lanes for easy, medium and hard")]
+    public int[] lanesPerDifficulty = { 3, 4, 5 };
+
+    // quantas lanes há agora (muda com a dificuldade)
+    public int LaneCount { get; private set; } = 3;
+
+    // centro da lane no eixo X (as lanes ficam sempre centradas na pista)
+    public float LaneX(int lane) => (lane - (LaneCount - 1) * 0.5f) * LaneWidth;
 
     [Header("UI")]
     public TMP_Text scoreText;
@@ -90,10 +100,10 @@ public class PianoGame : MonoBehaviour
     public bool GameOver { get; private set; }
     public bool Won { get; private set; }
 
-    const string Controls = "A / S / D = left / middle / right key     Q / E = stretch leg     W = jump     R = restart     M = menu     long tiles: stay on them";
+    const string Controls = "A S D F G = lanes (left to right)     Q / E = stretch leg     W = jump     R = restart     M = menu     long tiles: stay on them";
 
     readonly List<PianoTile> activeTiles = new List<PianoTile>();
-    readonly float[] keyFlash = new float[3];
+    readonly float[] keyFlash = new float[MaxLanes];
     GameObject[] templates;
     int score, misses;
     float clock;
@@ -130,6 +140,27 @@ public class PianoGame : MonoBehaviour
     private int difficulty = 1;
     private bool inMenu = true;
 
+    [Header("Menu and HUD (Tools > Piano > Build menu and HUD)")]
+    public GameMenu gameMenu;
+    public GameHud hud;
+
+    [Header("Sounds")]
+    [Tooltip("sound played on a miss")]
+    public AudioClip missSound;
+    [Range(0f, 1f)] public float missVolume = 0.8f;
+    AudioSource sfx;   // separado da música para não a parar
+
+    // lido pelo menu e pelo HUD
+    public int Score => score;
+    public int Misses => misses;
+    public int TotalNotes => noteTimes.Count;
+    public bool InMenu => inMenu;
+    public bool Finished => GameOver || Won;
+    public bool MusicPlaying => audioSource != null && audioSource.isPlaying;
+    public int SelectedSongIndex => selectedSongIndex;
+    public int SongCount => songs != null ? songs.Count : 0;
+    public string SongName(int i) => i >= 0 && i < SongCount ? songs[i].songName : "";
+
     void Start()
     {
         if (controller == null) controller = FindFirstObjectByType<PlayerController>();
@@ -144,6 +175,7 @@ public class PianoGame : MonoBehaviour
         if (missMaterial == null) missMaterial = NewMaterial(new Color(0.9f, 0.15f, 0.15f), new Color(0.5f, 0.02f, 0.02f));
 
         CreateTemplates();
+        SetLaneCount(LanesFor(difficulty));
         if (scoreText == null || messageText == null || centerText == null) CreateUI();
 
         Restart();
@@ -176,6 +208,7 @@ public class PianoGame : MonoBehaviour
         var notes = midi.GetNotes().OrderBy(n => n.Time);
 
         float lastEnd = 0f;   // fim da última nota aceite (depois do slide, se for slide)
+        int previousLane = -1;
         foreach (Note note in notes)
         {
             float time = ((float)note.TimeAs<MetricTimeSpan>(tempoMap).TotalMicroseconds / 1000000f) + audioOffset;
@@ -187,10 +220,20 @@ public class PianoGame : MonoBehaviour
             float duration = (float)note.LengthAs<MetricTimeSpan>(tempoMap).TotalMicroseconds / 1000000f;
             float hold = slides && duration >= slideMinDuration ? Mathf.Min(duration, slideMaxDuration) : 0f;
 
+            // lane pela nota; se houver pouco tempo, não manda o jogador para muito longe
+            int lane = note.NoteNumber % LaneCount;
+            if (previousLane >= 0)
+            {
+                float gap = time - lastEnd;
+                int maxStep = gap < MinStepTime ? 1 : gap < MinJumpTime ? 2 : LaneCount;
+                lane = Mathf.Clamp(lane, previousLane - maxStep, previousLane + maxStep);
+            }
+
             noteTimes.Add(time);
-            noteLanes.Add(note.NoteNumber % 3);
+            noteLanes.Add(lane);
             noteHolds.Add(hold);
             lastEnd = time + hold;
+            previousLane = lane;
         }
 
         tilesToWin = noteTimes.Count;
@@ -237,15 +280,26 @@ public class PianoGame : MonoBehaviour
         }
 
         UpdateTiles();
+        CheckSongFinished();
         UpdateKeys();
         UpdateUI();
     }
 
+    // ganha quando todas as teclas da música já passaram (mesmo com algumas falhas)
+    void CheckSongFinished()
+    {
+        if (inMenu || GameOver || Won || noteTimes.Count == 0 || currentNoteIndex < noteTimes.Count) return;
+        foreach (PianoTile t in activeTiles)
+            if (t != null && (t.state == PianoTile.State.Incoming || t.state == PianoTile.State.Holding)) return;
+        Won = true;
+    }
+
     public void StartSelectedGame()
     {
-        if (difficulty == 0) { speed = 3.0f; minNoteInterval = 0.70f; lives = 5; }
+        if (difficulty == 0) { speed = 3.0f; minNoteInterval = 0.70f; lives = 3; }
         else if (difficulty == 1) { speed = 4.5f; minNoteInterval = 0.45f; lives = 3; }
-        else if (difficulty == 2) { speed = 6.5f; minNoteInterval = 0.25f; lives = 2; }
+        else if (difficulty == 2) { speed = 6.5f; minNoteInterval = 0.25f; lives = 3; }
+        SetLaneCount(LanesFor(difficulty));
 
         if (songs.Count > 0 && selectedSongIndex < songs.Count)
         {
@@ -261,6 +315,72 @@ public class PianoGame : MonoBehaviour
         LerMidi();
         Restart();
     }
+
+    int LanesFor(int diff)
+    {
+        int n = lanesPerDifficulty != null && diff >= 0 && diff < lanesPerDifficulty.Length ? lanesPerDifficulty[diff] : 3;
+        return Mathf.Clamp(n, 1, MaxLanes);
+    }
+
+    // ------------------------------------------------------------- lanes
+
+    // muda o número de lanes: mostra/esconde as lanes e teclas do chão e centra tudo
+    // as lanes a mais são cópias da lane 1 (mesmo material e collider)
+    public void SetLaneCount(int count)
+    {
+        LaneCount = Mathf.Clamp(count, 1, MaxLanes);
+
+        Transform floor = transform.Find("Floor");
+        if (floor == null)
+        {
+            Debug.LogWarning("[Piano] no 'Floor' under the game: run Tools > Piano > Do everything.", this);
+            return;
+        }
+
+        var newKeys = new Renderer[LaneCount];
+        for (int i = 0; i < MaxLanes; i++)
+        {
+            bool on = i < LaneCount;
+            Transform lane = LanePart(floor, "Lane", i, on);
+            Transform key = LanePart(floor, "Key", i, on);
+            Transform sensor = LanePart(floor, "Key Sensor", i, on);
+            float x = on ? LaneX(i) : 0f;
+
+            if (lane != null) { lane.gameObject.SetActive(on); SetX(lane, x); }
+            if (key != null) { key.gameObject.SetActive(on); SetX(key, x); if (on) newKeys[i] = key.GetComponent<Renderer>(); }
+            if (sensor != null)
+            {
+                sensor.gameObject.SetActive(on);
+                SetX(sensor, x);
+                FloorKey fk = sensor.GetComponent<FloorKey>();
+                if (fk != null) fk.lane = i;
+            }
+        }
+        keys = newKeys;
+
+        // chão e linha de chegada com a largura das lanes todas
+        Transform floorBase = floor.Find("Base");
+        if (floorBase != null) floorBase.localScale = new Vector3(LaneCount * LaneWidth + 0.4f, floorBase.localScale.y, floorBase.localScale.z);
+        Transform line = floor.Find("Line");
+        if (line != null) line.localScale = new Vector3(LaneCount * LaneWidth, line.localScale.y, line.localScale.z);
+    }
+
+    // "Lane 3", "Key 3", "Key Sensor 3"...; se não existir e for precisa, copia a nº 1
+    static Transform LanePart(Transform floor, string prefix, int index, bool create)
+    {
+        Transform t = floor.Find($"{prefix} {index + 1}");
+        if (t != null || !create) return t;
+        Transform first = floor.Find($"{prefix} 1");
+        if (first == null) return null;
+        t = Instantiate(first.gameObject, floor).transform;
+        t.name = $"{prefix} {index + 1}";
+        t.localPosition = first.localPosition;
+        t.localRotation = first.localRotation;
+        t.localScale = first.localScale;
+        return t;
+    }
+
+    static void SetX(Transform t, float x) => t.localPosition = new Vector3(x, t.localPosition.y, t.localPosition.z);
 
     public void Restart()
     {
@@ -289,7 +409,8 @@ public class PianoGame : MonoBehaviour
     // lane ao acaso, sem repetir demais e sem saltos de 2 teclas quando não há tempo
     int PickLane()
     {
-        var options = new List<int> { 0, 1, 2 };
+        var options = new List<int>();
+        for (int l = 0; l < LaneCount; l++) options.Add(l);
         if (spawnInterval < MinJumpTime) options.RemoveAll(l => Mathf.Abs(l - lastLane) == 2);
         if (sameLaneCount >= 2) options.Remove(lastLane);
         if (options.Count == 0) options.Add(1);
@@ -302,7 +423,8 @@ public class PianoGame : MonoBehaviour
 
     void SpawnTile(int lane, float arrivalTime, float holdDuration)
     {
-        GameObject go = Instantiate(templates[lane], transform);
+        // só há 3 modelos de tecla: as lanes a mais repetem-nos
+        GameObject go = Instantiate(templates[lane % templates.Length], transform);
         go.SetActive(true);
 
         PianoTile tile = go.GetComponent<PianoTile>();
@@ -328,7 +450,7 @@ public class PianoGame : MonoBehaviour
 
     // a frente do tile chega ao jogador (z = 0) no tempo marcado
     void PlaceTile(PianoTile t) =>
-        t.transform.localPosition = new Vector3((t.lane - 1) * LaneWidth, 0f, (t.arrivalTime - clock) * speed);
+        t.transform.localPosition = new Vector3(LaneX(t.lane), 0f, (t.arrivalTime - clock) * speed);
 
     void UpdateTiles()
     {
@@ -413,14 +535,34 @@ public class PianoGame : MonoBehaviour
         t.PaintProgress(missMaterial);
         misses++;
         ShowFeedback("MISS", new Color(1f, 0.3f, 0.3f));
-        if (misses >= lives) GameOver = true;
+        PlayMissSound();
+        if (misses >= lives)
+        {
+            GameOver = true;
+            if (audioSource != null) audioSource.Stop();   // perdeu: a música pára
+        }
+    }
+
+    void PlayMissSound()
+    {
+        if (missSound == null) return;
+        if (sfx == null)
+        {
+            // fonte de som própria (num filho) para não mexer na da música
+            var go = new GameObject("SFX");
+            go.transform.SetParent(transform, false);
+            sfx = go.AddComponent<AudioSource>();
+            sfx.playOnAwake = false;
+            sfx.spatialBlend = 0f;
+        }
+        sfx.PlayOneShot(missSound, missVolume);
     }
 
     // faíscas na tecla, junto ao jogador; o slide completo dá um efeito maior
     void PlayHitEffect(PianoTile t)
     {
         if (!hitEffects) return;
-        Vector3 position = transform.TransformPoint(new Vector3((t.lane - 1) * LaneWidth, TileHeight, 0.3f));
+        Vector3 position = transform.TransformPoint(new Vector3(LaneX(t.lane), TileHeight, 0.3f));
         Color color = hitMaterial != null && hitMaterial.HasProperty(BaseColorId) ? hitMaterial.GetColor(BaseColorId) : KeyHitColor;
         HitEffects.Play(position, color, t.IsSlide ? 1.8f : 1f, effectMaterial);
     }
@@ -437,7 +579,7 @@ public class PianoGame : MonoBehaviour
     void UpdateKeys()
     {
         if (block == null) block = new MaterialPropertyBlock();
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < LaneCount; i++)
         {
             keyFlash[i] = Mathf.MoveTowards(keyFlash[i], 0f, Time.deltaTime * 3f);
             if (keys == null || i >= keys.Length || keys[i] == null) continue;
@@ -594,12 +736,15 @@ public class PianoGame : MonoBehaviour
 
     void UpdateUI()
     {
-        SetText(scoreText, ref lastScore, $"Score: {score}\nMisses: {misses}/{lives}");
-        SetText(messageText, ref lastMessage, GameOver || Won ? "R = play again     M = menu" : Controls);
+        // com o HUD novo o score é só o número (a estrela está ao lado e as vidas são as notas)
+        SetText(scoreText, ref lastScore, hud != null ? score.ToString() : $"Score: {score}\nMisses: {misses}/{lives}");
+        bool resultScreen = hud != null && hud.resultPanel != null;   // o ecrã do fim mostra isto
+        SetText(messageText, ref lastMessage, GameOver || Won ? (resultScreen ? "" : "R = play again     M = menu") : Controls);
 
         string center = "";
         Color centerColor = Color.white;
-        if (GameOver)
+        if ((GameOver || Won) && resultScreen) center = "";
+        else if (GameOver)
         {
             center = $"GAME OVER\n<size=50%>{score} tiles hit</size>";
             centerColor = new Color(1f, 0.3f, 0.3f);
@@ -653,13 +798,13 @@ public class PianoGame : MonoBehaviour
     {
         Gizmos.matrix = transform.localToWorldMatrix;
         Gizmos.color = Color.green;
-        for (int i = 0; i <= 3; i++)
+        for (int i = 0; i <= LaneCount; i++)
         {
-            float x = (i - 1.5f) * LaneWidth;
+            float x = (i - LaneCount * 0.5f) * LaneWidth;
             Gizmos.DrawLine(new Vector3(x, 0f, EndZ), new Vector3(x, 0f, LeadTime * speed));
         }
         Gizmos.color = Color.cyan;
-        Gizmos.DrawLine(new Vector3(-1.5f * LaneWidth, 0.01f, 0f), new Vector3(1.5f * LaneWidth, 0.01f, 0f));
+        Gizmos.DrawLine(new Vector3(-0.5f * LaneCount * LaneWidth, 0.01f, 0f), new Vector3(0.5f * LaneCount * LaneWidth, 0.01f, 0f));
     }
 
     // ------------------------------------------------------------- Menu de Músicas
@@ -674,6 +819,9 @@ public class PianoGame : MonoBehaviour
     public void SetDifficulty(int diff)
     {
         difficulty = diff;
+        // mostra logo no chão quantas lanes vai ter
+        SetLaneCount(LanesFor(difficulty));
+        if (controller != null) controller.ResetPlayer();
         Debug.Log($"Dificuldade selecionada: {diff}");
         UpdateMenuUI();
     }
@@ -693,6 +841,7 @@ public class PianoGame : MonoBehaviour
 
         // Ativa o painel do Canvas e atualiza os textos
         if (menuPanel != null) menuPanel.SetActive(true);
+        if (gameMenu != null) gameMenu.ShowStart();   // volta sempre ao ecrã Play / Exit
         UpdateMenuUI();
     }
 
@@ -706,6 +855,6 @@ public class PianoGame : MonoBehaviour
 
         string nomeDificuldade = difficulty == 0 ? "Fácil" : (difficulty == 1 ? "Médio" : "Difícil");
 
-        menuSelectionText.text = $"Música: <color=#00FF88>{nomeMusica}</color>\nDificuldade: <color=#00D8FF>{nomeDificuldade}</color>";
+        menuSelectionText.text = $"Música: <color=#00FF88>{nomeMusica}</color>\nDificuldade: <color=#00D8FF>{nomeDificuldade}</color> ({LanesFor(difficulty)} linhas)";
     }
 }

@@ -6123,8 +6123,10 @@ MonoBehaviour:
   lives: 3
   tilesToWin: 20
   slides: 1
-  slideMinDuration: 0.8
+  slideLengthFactor: 1.5
+  slideMinHold: 0.4
   slideMaxDuration: 2.5
+  slideGap: 0.25
   player: {fileID: 1832873949}
   controller: {fileID: 1832873954}
   playerFeet: {fileID: 1832873951}

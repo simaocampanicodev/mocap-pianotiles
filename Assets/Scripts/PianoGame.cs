@@ -68,6 +68,9 @@ public class PianoGame : MonoBehaviour
     public GameObject[] pressedTileModels = new GameObject[3];
     [Tooltip("turn the tile models upside down (use if they show the wrong side up)")]
     public bool flipTileModels = false;
+    [Tooltip("keep the texture/material that comes with the tile models (off = paint them with Tile Material)")]
+    public bool keepModelTextures = true;
+    [Tooltip("colour of the tiles when there is no model (cube), or when Keep Model Textures is off")]
     public Material tileMaterial;
     public Material hitMaterial;
     public Material missMaterial;
@@ -694,7 +697,9 @@ public class PianoGame : MonoBehaviour
             tile.normal = normal;
             tile.pressed = pressed;
             tile.fill = CreateFill(root.transform, fit);
-            tile.Paint(tileMaterial);
+            // os modelos já trazem o material com textura (Piano.mat): só pinta se for pedido ou se for o cubo de reserva
+            bool hasModel = lane < tileModels.Length && tileModels[lane] != null;
+            if (!hasModel || !keepModelTextures) tile.Paint(tileMaterial);
             templates[lane] = root;
         }
     }

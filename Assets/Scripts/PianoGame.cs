@@ -46,12 +46,16 @@ public class PianoGame : MonoBehaviour
     public int tilesToWin = 20;
 
     [Header("Slides (hold tiles)")]
-    [Tooltip("turn the long notes of the song into slides")]
+    [Tooltip("turn the held (long) notes of the song into slides")]
     public bool slides = true;
-    [Tooltip("notes at least this long (seconds) become slides")]
-    public float slideMinDuration = 0.8f;
+    [Tooltip("a note is a slide when it lasts this many times longer than the usual note of the song")]
+    public float slideLengthFactor = 1.5f;
+    [Tooltip("shortest slide (seconds): shorter held notes stay normal tiles")]
+    public float slideMinHold = 0.4f;
     [Tooltip("longest time the player has to stay on a slide (seconds)")]
     public float slideMaxDuration = 2.5f;
+    [Tooltip("free time (seconds) between the end of a slide and the next tile, to get to the next lane")]
+    public float slideGap = 0.25f;
 
     // tudo isto é ligado pelo menu Piano, mas dá para arrastar à mão
     [Header("Player")]
@@ -182,6 +186,16 @@ public class PianoGame : MonoBehaviour
         OpenMenu();
     }
 
+    const float ChordWindow = 0.03f;   // notas que começam com menos que isto de diferença são o mesmo acorde
+
+    struct PickedNote
+    {
+        public float time;       // quando a tecla chega ao jogador
+        public float duration;   // quanto tempo a nota toca
+        public int lanePitch;    // nota que escolhe a lane (a primeira, como antes)
+        public int topPitch;     // nota mais aguda do acorde
+    }
+
     void LerMidi()
     {
         noteTimes.Clear();
@@ -207,37 +221,72 @@ public class PianoGame : MonoBehaviour
 
         var notes = midi.GetNotes().OrderBy(n => n.Time);
 
-        float lastEnd = 0f;   // fim da última nota aceite (depois do slide, se for slide)
-        int previousLane = -1;
+        // 1) as teclas: igual a antes (uma nota a cada minNoteInterval, no tempo da música)
+        //    num acorde a duração que conta é a da nota mais aguda (normalmente a melodia)
+        var picked = new List<PickedNote>();
+        float lastTime = 0f;
         foreach (Note note in notes)
         {
             float time = ((float)note.TimeAs<MetricTimeSpan>(tempoMap).TotalMicroseconds / 1000000f) + audioOffset;
-
-            if (noteTimes.Count > 0 && (time - lastEnd) < minNoteInterval)
-                continue;
-
-            // nota longa = slide (fica em cima enquanto a nota toca)
             float duration = (float)note.LengthAs<MetricTimeSpan>(tempoMap).TotalMicroseconds / 1000000f;
-            float hold = slides && duration >= slideMinDuration ? Mathf.Min(duration, slideMaxDuration) : 0f;
+
+            if (picked.Count > 0 && (time - lastTime) < minNoteInterval)
+            {
+                PickedNote last = picked[picked.Count - 1];
+                if (time - lastTime < ChordWindow && note.NoteNumber > last.topPitch)
+                {
+                    last.duration = duration;
+                    last.topPitch = note.NoteNumber;
+                    picked[picked.Count - 1] = last;
+                }
+                continue;
+            }
+
+            picked.Add(new PickedNote { time = time, duration = duration, lanePitch = note.NoteNumber, topPitch = note.NoteNumber });
+            lastTime = time;
+        }
+
+        // 2) slides: só as notas que a música segura mais do que o normal dela,
+        //    e o slide acaba antes da tecla seguinte (nunca tapa notas da música)
+        float threshold = slideMinHold;
+        if (picked.Count > 0)
+        {
+            var sorted = picked.Select(p => p.duration).OrderBy(d => d).ToList();
+            threshold = Mathf.Max(slideMinHold, sorted[sorted.Count / 2] * slideLengthFactor);
+        }
+
+        float lastEnd = 0f;   // fim da última tecla (depois do slide, se for slide)
+        int previousLane = -1;
+        for (int i = 0; i < picked.Count; i++)
+        {
+            PickedNote n = picked[i];
+            float hold = 0f;
+            if (slides && n.duration >= threshold)
+            {
+                float room = i + 1 < picked.Count ? picked[i + 1].time - n.time - slideGap : float.MaxValue;
+                hold = Mathf.Min(n.duration, slideMaxDuration, room);
+                if (hold < slideMinHold) hold = 0f;
+            }
 
             // lane pela nota; se houver pouco tempo, não manda o jogador para muito longe
-            int lane = note.NoteNumber % LaneCount;
+            int lane = n.lanePitch % LaneCount;
             if (previousLane >= 0)
             {
-                float gap = time - lastEnd;
+                float gap = n.time - lastEnd;
                 int maxStep = gap < MinStepTime ? 1 : gap < MinJumpTime ? 2 : LaneCount;
                 lane = Mathf.Clamp(lane, previousLane - maxStep, previousLane + maxStep);
             }
 
-            noteTimes.Add(time);
+            noteTimes.Add(n.time);
             noteLanes.Add(lane);
             noteHolds.Add(hold);
-            lastEnd = time + hold;
+            lastEnd = n.time + hold;
             previousLane = lane;
         }
 
         tilesToWin = noteTimes.Count;
-        Debug.Log($"[Piano] MIDI carregado com sucesso! Total de notas a cair: {noteTimes.Count} (slides: {noteHolds.Count(h => h > 0f)})");
+        Debug.Log($"[Piano] MIDI carregado com sucesso! Total de notas a cair: {noteTimes.Count} " +
+                  $"(slides: {noteHolds.Count(h => h > 0f)}, notas com {threshold:0.00}s ou mais)");
     }
 
     void Update()
